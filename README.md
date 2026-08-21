@@ -80,8 +80,18 @@ python scanner.py --tickers AAPL MSFT NVDA TSLA --buy-only
 
 ### Web app
 
-A Flask front-end wraps the same scanning logic in a browser UI: enter
-tickers, hit Scan, get a ranked, color-coded results table.
+Two front-ends wrap the same `scan()` logic — pick whichever you prefer.
+
+**Streamlit** (recommended — simplest to deploy):
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+Then open http://localhost:8501 in your browser.
+
+**Flask**:
 
 ```bash
 pip install -r requirements.txt
@@ -90,23 +100,40 @@ python app.py
 
 Then open http://localhost:5000 in your browser.
 
-### Deploying to Render
+### Deploying
 
-This repo includes a `render.yaml` blueprint so you can deploy the web app
-with a public URL (reachable from your phone) in a few clicks:
+**Option A — Streamlit Community Cloud (easiest, free, zero config):**
 
 1. Push this repo to GitHub (already done if you're reading this on GitHub).
-2. In the [Render dashboard](https://dashboard.render.com), choose
+2. Go to [share.streamlit.io](https://share.streamlit.io), sign in with
+   GitHub, click **New app**.
+3. Select this repo/branch and set the main file path to
+   `streamlit_app.py`. Streamlit Cloud installs `requirements.txt`
+   automatically.
+4. Deploy — you get a public URL like
+   `https://long-term-stock-scanner.streamlit.app`, reachable from any
+   device including your phone.
+
+**Option B — Render:**
+
+This repo includes a `render.yaml` blueprint (currently configured to run
+`streamlit_app.py`) so you can deploy with a public URL in a few clicks:
+
+1. In the [Render dashboard](https://dashboard.render.com), choose
    **New > Blueprint**, connect this repo, and Render will read
    `render.yaml` and provision the service automatically (free plan, Python
-   runtime, `gunicorn app:app` as the start command).
-3. Once deployed, Render gives you a public URL like
-   `https://long-term-stock-scanner.onrender.com` — open that on any device,
-   including your phone.
+   runtime, Streamlit as the start command).
+2. Once deployed, Render gives you a public URL like
+   `https://long-term-stock-scanner.onrender.com`.
+
+To deploy the Flask app on Render instead, change `render.yaml`'s
+`startCommand` to `gunicorn app:app --bind 0.0.0.0:$PORT` (and update the
+`Procfile` the same way).
 
 Notes:
-- The free plan spins down after inactivity, so the first request after a
-  while can take ~30-50s to wake back up.
+- Render's free plan spins down after inactivity, so the first request
+  after a while can take ~30-50s to wake back up. Streamlit Community Cloud
+  apps also sleep after inactivity and wake on the next visit.
 - A `Procfile` is also included for platforms that use that convention
   instead of `render.yaml` (e.g. Heroku-style buildpacks).
 
