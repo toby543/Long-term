@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Long-Term Stock Strategy Scanner</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --border: #2a2e38;
+      --text: #e6e8ec;
+      --muted: #9aa0ab;
+      --accent: #4f8cff;
+      --buy: #1f9d55;
+      --watch: #c99a2e;
+      --avoid: #b3403a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 2rem 1rem;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    p.subtitle { color: var(--muted); margin-top: 0; margin-bottom: 1.5rem; }
+    form {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.35rem; }
+    textarea {
+      width: 100%;
+      min-height: 70px;
+      background: #0b0d12;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.95rem;
+      resize: vertical;
+    }
+    .row { display: flex; align-items: center; justify-content: space-between; margin-top: 0.9rem; flex-wrap: wrap; gap: 0.75rem; }
+    .checkbox-row { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.9rem; }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.6rem 1.2rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { opacity: 0.9; }
+    .error {
+      background: #3a1a1a;
+      border: 1px solid var(--avoid);
+      color: #f3b4b0;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    caption { text-align: left; color: var(--muted); margin-bottom: 0.5rem; font-size: 0.85rem; }
+    th, td {
+      text-align: left;
+      padding: 0.55rem 0.7rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.88rem;
+      white-space: nowrap;
+    }
+    th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.03em; }
+    tr:last-child td { border-bottom: none; }
+    .verdict { font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 6px; font-size: 0.78rem; }
+    .verdict-BUY { background: rgba(31,157,85,0.15); color: var(--buy); }
+    .verdict-WATCH { background: rgba(201,154,46,0.15); color: var(--watch); }
+    .verdict-AVOID { background: rgba(179,64,58,0.15); color: var(--avoid); }
+    .table-scroll { overflow-x: auto; }
+    footer { color: var(--muted); font-size: 0.8rem; margin-top: 2rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Long-Term Stock Strategy Scanner</h1>
+    <p class="subtitle">Fundamental quality/GARP screen + technical trend confirmation, for buy-and-hold candidates.</p>
+
+    <form method="post">
+      <label for="tickers">Tickers (comma or newline separated)</label>
+      <textarea id="tickers" name="tickers">{{ tickers_input }}</textarea>
+      <div class="row">
+        <div class="checkbox-row">
+          <input type="checkbox" id="buy_only" name="buy_only" {% if buy_only %}checked{% endif %}>
+          <label for="buy_only" style="margin:0;">Show BUY only</label>
+        </div>
+        <button type="submit">Scan</button>
+      </div>
+    </form>
+
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+
+    {% if results is not none %}
+      {% if results|length == 0 %}
+        <p style="color: var(--muted);">No results to show.</p>
+      {% else %}
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                {% for key in results[0].keys() %}
+                  <th>{{ key }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in results %}
+                <tr>
+                  {% for key, value in row.items() %}
+                    {% if key == "Verdict" %}
+                      <td>
+                        {% if value in ["BUY", "WATCH", "AVOID"] %}
+                          <span class="verdict verdict-{{ value }}">{{ value }}</span>
+                        {% else %}
+                          {{ value }}
+                        {% endif %}
+                      </td>
+                    {% else %}
+                      <td>{{ value if value is not none else "—" }}</td>
+                    {% endif %}
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    {% endif %}
+
+    <footer>Data via Yahoo Finance / yfinance. For research and education only — not financial advice.</footer>
+  </div>
+</body>
+</html>
