@@ -78,6 +78,18 @@ python scanner.py --tickers AAPL MSFT --output results.csv
 python scanner.py --tickers AAPL MSFT NVDA TSLA --buy-only
 ```
 
+### Web app
+
+A Flask front-end wraps the same scanning logic in a browser UI: enter
+tickers, hit Scan, get a ranked, color-coded results table.
+
+```bash
+pip install -r requirements.txt
+python app.py
+```
+
+Then open http://localhost:5000 in your browser.
+
 ## Output
 
 The scanner prints a ranked table with fundamental score, technical score,
