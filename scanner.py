@@ -8,7 +8,10 @@ confirmation screen to surface candidates suitable for long-term
 """
 
 import argparse
+import random
 import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
@@ -25,7 +28,33 @@ DEFAULT_TICKERS = [
 
 BENCHMARK_TICKER = "SPY"
 NIFTY_BENCHMARK_TICKER = "^CRSLDX"  # Nifty 500 Total Return-ish proxy index on NSE
-MAX_WORKERS = 12
+
+# Yahoo Finance rate-limits aggressively, especially from shared hosting IPs
+# (Streamlit Cloud, Render). Keep concurrency low, space requests out, and
+# retry with backoff on 429s rather than hammering it with a big thread pool.
+MAX_WORKERS = 4
+MIN_REQUEST_INTERVAL = 0.5  # seconds between requests, enforced globally across workers
+MAX_RETRIES = 4
+RETRY_BASE_DELAY = 3.0  # seconds; backs off 3s, 6s, 12s, 24s (+ jitter)
+
+_rate_limit_lock = threading.Lock()
+_last_request_time = 0.0
+
+
+def _throttle():
+    """Enforce a minimum gap between outgoing yfinance requests across all threads."""
+    global _last_request_time
+    with _rate_limit_lock:
+        now = time.monotonic()
+        wait = MIN_REQUEST_INTERVAL - (now - _last_request_time)
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_time = time.monotonic()
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "429" in msg or "too many requests" in msg or "rate limit" in msg
 
 
 @dataclass
@@ -80,11 +109,24 @@ def compute_rsi(series: pd.Series, period: int = 14) -> float:
 
 def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame) -> StockMetrics:
     m = StockMetrics(ticker=ticker)
-    try:
-        tk = yf.Ticker(ticker)
-        info = tk.info or {}
-        hist = tk.history(period="1y", auto_adjust=True)
 
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            _throttle()
+            tk = yf.Ticker(ticker)
+            info = tk.info or {}
+            hist = tk.history(period="1y", auto_adjust=True)
+            break
+        except Exception as exc:
+            if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
+                delay = RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1.5)
+                time.sleep(delay)
+                continue
+            m.error = "Rate limited by Yahoo Finance — try again shortly or scan fewer tickers" \
+                if _is_rate_limit_error(exc) else str(exc)
+            return m
+
+    try:
         if hist.empty:
             m.error = "No price history"
             return m
@@ -238,10 +280,17 @@ def scan(tickers: list[str], max_workers: int = MAX_WORKERS) -> pd.DataFrame:
     is_indian = any(t.upper().endswith((".NS", ".BO")) for t in tickers)
     benchmark_ticker = NIFTY_BENCHMARK_TICKER if is_indian else BENCHMARK_TICKER
 
-    try:
-        benchmark_hist = yf.Ticker(benchmark_ticker).history(period="1y", auto_adjust=True)
-    except Exception:
-        benchmark_hist = None
+    benchmark_hist = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            _throttle()
+            benchmark_hist = yf.Ticker(benchmark_ticker).history(period="1y", auto_adjust=True)
+            break
+        except Exception as exc:
+            if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
+                time.sleep(RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1.5))
+                continue
+            break  # non-rate-limit error, or retries exhausted — proceed without a benchmark
 
     rows = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
