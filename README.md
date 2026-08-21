@@ -85,10 +85,18 @@ python scanner.py --index nifty500 --buy-only --output nifty500_buys.csv
 Note on the Nifty 500: the constituent list is fetched live from NSE
 (`indices.py`) rather than hardcoded, since index membership changes
 periodically. Scanning all 500 tickers hits `yfinance` 500+ times, so it can
-take several minutes even with the built-in thread-pool parallelism
-(`scan()` uses up to 12 concurrent workers) — use `--limit` to try a smaller
-slice first. Relative-strength scoring automatically benchmarks `.NS`/`.BO`
-tickers against the Nifty 500 index (`^CRSLDX`) instead of SPY.
+take several minutes — use `--limit` to try a smaller slice first.
+Relative-strength scoring automatically benchmarks `.NS`/`.BO` tickers
+against the Nifty 500 index (`^CRSLDX`) instead of SPY.
+
+**On rate limiting:** Yahoo Finance aggressively rate-limits `yfinance`
+requests, especially from shared hosting IPs (Streamlit Cloud, Render free
+tier). `scanner.py` handles this by keeping concurrency low (4 workers),
+spacing requests out (min ~0.5s apart, enforced globally across threads),
+and retrying 429s with exponential backoff (up to 4 retries). If you still
+hit `ERROR: Rate limited by Yahoo Finance` on individual tickers, wait a
+minute and re-scan, or scan a smaller batch (`--limit`) at a time — this is
+Yahoo throttling the shared IP the app runs on, not a bug in the scanner.
 
 ### Web app
 
