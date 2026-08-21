@@ -99,9 +99,29 @@
     <h1>Long-Term Stock Strategy Scanner</h1>
     <p class="subtitle">Fundamental quality/GARP screen + technical trend confirmation, for buy-and-hold candidates.</p>
 
-    <form method="post">
-      <label for="tickers">Tickers (comma or newline separated)</label>
-      <textarea id="tickers" name="tickers">{{ tickers_input }}</textarea>
+    <form method="post" id="scan-form">
+      <div class="checkbox-row" style="margin-bottom: 0.9rem; gap: 1.25rem;">
+        <label style="display:flex; align-items:center; gap:0.35rem; margin:0; color: var(--text);">
+          <input type="radio" name="source" value="custom" onchange="toggleSource()" {% if source != 'nifty500' %}checked{% endif %}>
+          Custom list
+        </label>
+        <label style="display:flex; align-items:center; gap:0.35rem; margin:0; color: var(--text);">
+          <input type="radio" name="source" value="nifty500" onchange="toggleSource()" {% if source == 'nifty500' %}checked{% endif %}>
+          Nifty 500 (India)
+        </label>
+      </div>
+
+      <div id="custom-fields">
+        <label for="tickers">Tickers (comma or newline separated)</label>
+        <textarea id="tickers" name="tickers">{{ tickers_input }}</textarea>
+      </div>
+
+      <div id="nifty-fields" style="display:none;">
+        <label for="limit">Limit (blank = all 500; scanning all can take a few minutes)</label>
+        <input type="number" id="limit" name="limit" min="1" max="500" placeholder="e.g. 50"
+               style="width:100%; background:#0b0d12; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:0.6rem;">
+      </div>
+
       <div class="row">
         <div class="checkbox-row">
           <input type="checkbox" id="buy_only" name="buy_only" {% if buy_only %}checked{% endif %}>
@@ -110,6 +130,15 @@
         <button type="submit">Scan</button>
       </div>
     </form>
+
+    <script>
+      function toggleSource() {
+        const nifty = document.querySelector('input[name="source"][value="nifty500"]').checked;
+        document.getElementById('custom-fields').style.display = nifty ? 'none' : 'block';
+        document.getElementById('nifty-fields').style.display = nifty ? 'block' : 'none';
+      }
+      toggleSource();
+    </script>
 
     {% if error %}
       <div class="error">{{ error }}</div>

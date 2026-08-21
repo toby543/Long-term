@@ -20,28 +20,56 @@ st.caption(
     "strength vs. SPY) for long-term buy-and-hold candidates."
 )
 
+source = st.radio(
+    "Ticker source",
+    ["Custom list", "Nifty 500 (India)"],
+    horizontal=True,
+)
+
 with st.form("scan_form"):
-    tickers_input = st.text_area(
-        "Tickers (comma or newline separated)",
-        value=", ".join(DEFAULT_TICKERS),
-        height=100,
-    )
+    if source == "Custom list":
+        tickers_input = st.text_area(
+            "Tickers (comma or newline separated)",
+            value=", ".join(DEFAULT_TICKERS),
+            height=100,
+        )
+        limit = None
+    else:
+        st.caption(
+            "Fetches the current Nifty 500 constituent list live from NSE "
+            "(cached locally for a week). Scanning all 500 can take a few "
+            "minutes — use the limit below to try a subset first."
+        )
+        tickers_input = None
+        limit = st.slider("Limit (0 = all 500)", 0, 500, 50, step=10)
+
     col1, col2 = st.columns([1, 4])
     with col1:
         buy_only = st.checkbox("Show BUY only")
     submitted = st.form_submit_button("Scan", type="primary")
 
 if submitted:
-    tickers = [
-        t.strip().upper()
-        for t in tickers_input.replace("\n", ",").split(",")
-        if t.strip()
-    ]
-    tickers = list(dict.fromkeys(tickers))  # de-dupe, preserve order
-
-    if not tickers:
-        st.error("Enter at least one ticker symbol.")
+    if source == "Custom list":
+        tickers = [
+            t.strip().upper()
+            for t in tickers_input.replace("\n", ",").split(",")
+            if t.strip()
+        ]
+        tickers = list(dict.fromkeys(tickers))  # de-dupe, preserve order
     else:
+        with st.spinner("Fetching Nifty 500 constituent list from NSE..."):
+            try:
+                from indices import get_nifty500_tickers
+                tickers = get_nifty500_tickers()
+            except Exception as exc:
+                st.error(f"Could not load Nifty 500 list: {exc}")
+                tickers = []
+        if limit:
+            tickers = tickers[:limit]
+
+    if not tickers and source == "Custom list":
+        st.error("Enter at least one ticker symbol.")
+    elif tickers:
         with st.spinner(f"Scanning {len(tickers)} ticker(s)..."):
             try:
                 df = scan(tickers)

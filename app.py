@@ -21,16 +21,31 @@ def index():
     buy_only = False
     error = None
 
+    source = "custom"
+
     if request.method == "POST":
-        tickers_input = request.form.get("tickers", "")
+        source = request.form.get("source", "custom")
         buy_only = bool(request.form.get("buy_only"))
 
-        tickers = [t.strip().upper() for t in tickers_input.replace("\n", ",").split(",") if t.strip()]
-        tickers = list(dict.fromkeys(tickers))  # de-dupe, preserve order
-
-        if not tickers:
-            error = "Enter at least one ticker symbol."
+        if source == "nifty500":
+            try:
+                from indices import get_nifty500_tickers
+                tickers = get_nifty500_tickers()
+            except Exception as exc:
+                error = f"Could not load Nifty 500 list: {exc}"
+                tickers = []
+            limit = request.form.get("limit", type=int)
+            if limit:
+                tickers = tickers[:limit]
+            tickers_input = ", ".join(tickers)
         else:
+            tickers_input = request.form.get("tickers", "")
+            tickers = [t.strip().upper() for t in tickers_input.replace("\n", ",").split(",") if t.strip()]
+            tickers = list(dict.fromkeys(tickers))  # de-dupe, preserve order
+
+        if not error and not tickers:
+            error = "Enter at least one ticker symbol."
+        elif not error:
             try:
                 df = scan(tickers)
                 if buy_only:
@@ -44,6 +59,7 @@ def index():
         results=results,
         tickers_input=tickers_input,
         buy_only=buy_only,
+        source=source,
         error=error,
     )
 

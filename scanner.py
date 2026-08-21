@@ -9,6 +9,7 @@ confirmation screen to surface candidates suitable for long-term
 
 import argparse
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -23,6 +24,8 @@ DEFAULT_TICKERS = [
 ]
 
 BENCHMARK_TICKER = "SPY"
+NIFTY_BENCHMARK_TICKER = "^CRSLDX"  # Nifty 500 Total Return-ish proxy index on NSE
+MAX_WORKERS = 12
 
 
 @dataclass
@@ -198,44 +201,53 @@ def classify(fundamental_score: float, technical_score: float) -> str:
     return "AVOID"
 
 
-def scan(tickers: list[str]) -> pd.DataFrame:
+def _row_for(m: StockMetrics) -> dict:
+    if m.error:
+        return {
+            "Ticker": m.ticker, "Fund.": None, "Tech.": None, "Score": None,
+            "Verdict": f"ERROR: {m.error}",
+            "P/E": None, "PEG": None, "ROE%": None, "RevGr%": None,
+            "D/E": None, "RSI": None, "%OffHigh": None, "RS6m%": None,
+        }
+
+    m.fundamental_score = score_fundamentals(m)
+    m.technical_score = score_technicals(m)
+    m.composite_score = round(m.fundamental_score * 0.65 + m.technical_score * 0.35, 1)
+    m.verdict = classify(m.fundamental_score, m.technical_score)
+
+    return {
+        "Ticker": m.ticker,
+        "Fund.": m.fundamental_score,
+        "Tech.": m.technical_score,
+        "Score": m.composite_score,
+        "Verdict": m.verdict,
+        "P/E": round(m.pe_ratio, 1) if m.pe_ratio else None,
+        "PEG": round(m.peg_ratio, 2) if m.peg_ratio else None,
+        "ROE%": round(m.roe * 100, 1) if m.roe else None,
+        "RevGr%": round(m.revenue_growth * 100, 1) if m.revenue_growth else None,
+        "D/E": round(m.debt_to_equity, 2) if m.debt_to_equity else None,
+        "RSI": round(m.rsi_14, 1) if m.rsi_14 and not np.isnan(m.rsi_14) else None,
+        "%OffHigh": round(m.pct_off_52w_high, 1) if m.pct_off_52w_high is not None else None,
+        "RS6m%": round(m.relative_strength_6m, 1) if m.relative_strength_6m is not None else None,
+    }
+
+
+def scan(tickers: list[str], max_workers: int = MAX_WORKERS) -> pd.DataFrame:
+    # Indices outside the US need their own benchmark for relative-strength
+    # scoring — an Indian stock's return vs. SPY isn't a meaningful signal.
+    is_indian = any(t.upper().endswith((".NS", ".BO")) for t in tickers)
+    benchmark_ticker = NIFTY_BENCHMARK_TICKER if is_indian else BENCHMARK_TICKER
+
     try:
-        benchmark_hist = yf.Ticker(BENCHMARK_TICKER).history(period="1y", auto_adjust=True)
+        benchmark_hist = yf.Ticker(benchmark_ticker).history(period="1y", auto_adjust=True)
     except Exception:
         benchmark_hist = None
 
     rows = []
-    for t in tickers:
-        m = fetch_metrics(t, benchmark_hist)
-        if m.error:
-            rows.append({
-                "Ticker": t, "Fund.": None, "Tech.": None, "Score": None,
-                "Verdict": f"ERROR: {m.error}",
-                "P/E": None, "PEG": None, "ROE%": None, "RevGr%": None,
-                "D/E": None, "RSI": None, "%OffHigh": None, "RS6m%": None,
-            })
-            continue
-
-        m.fundamental_score = score_fundamentals(m)
-        m.technical_score = score_technicals(m)
-        m.composite_score = round(m.fundamental_score * 0.65 + m.technical_score * 0.35, 1)
-        m.verdict = classify(m.fundamental_score, m.technical_score)
-
-        rows.append({
-            "Ticker": m.ticker,
-            "Fund.": m.fundamental_score,
-            "Tech.": m.technical_score,
-            "Score": m.composite_score,
-            "Verdict": m.verdict,
-            "P/E": round(m.pe_ratio, 1) if m.pe_ratio else None,
-            "PEG": round(m.peg_ratio, 2) if m.peg_ratio else None,
-            "ROE%": round(m.roe * 100, 1) if m.roe else None,
-            "RevGr%": round(m.revenue_growth * 100, 1) if m.revenue_growth else None,
-            "D/E": round(m.debt_to_equity, 2) if m.debt_to_equity else None,
-            "RSI": round(m.rsi_14, 1) if m.rsi_14 and not np.isnan(m.rsi_14) else None,
-            "%OffHigh": round(m.pct_off_52w_high, 1) if m.pct_off_52w_high is not None else None,
-            "RS6m%": round(m.relative_strength_6m, 1) if m.relative_strength_6m is not None else None,
-        })
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(fetch_metrics, t, benchmark_hist): t for t in tickers}
+        for future in as_completed(futures):
+            rows.append(_row_for(future.result()))
 
     df = pd.DataFrame(rows)
     if "Score" in df:
@@ -247,6 +259,11 @@ def main():
     parser = argparse.ArgumentParser(description="Long-term stock strategy scanner")
     parser.add_argument("--tickers", nargs="+", help="Ticker symbols to scan")
     parser.add_argument("--file", help="Path to a file with one ticker per line")
+    parser.add_argument(
+        "--index", choices=["nifty500"],
+        help="Scan a whole index instead of (or in addition to) --tickers/--file",
+    )
+    parser.add_argument("--limit", type=int, help="Cap the number of tickers scanned (useful with --index)")
     parser.add_argument("--output", help="Path to write results as CSV")
     parser.add_argument("--buy-only", action="store_true", help="Only show BUY verdicts")
     args = parser.parse_args()
@@ -257,10 +274,19 @@ def main():
     if args.file:
         with open(args.file) as f:
             tickers.extend(line.strip() for line in f if line.strip())
+    if args.index == "nifty500":
+        from indices import get_nifty500_tickers
+        try:
+            tickers.extend(get_nifty500_tickers())
+        except Exception as exc:
+            print(f"Failed to load Nifty 500 constituents: {exc}", file=sys.stderr)
+            return 1
     if not tickers:
         tickers = DEFAULT_TICKERS
 
     tickers = [t.upper() for t in dict.fromkeys(tickers)]  # de-dupe, preserve order
+    if args.limit:
+        tickers = tickers[: args.limit]
 
     print(f"Scanning {len(tickers)} ticker(s): {', '.join(tickers)}\n")
     df = scan(tickers)
