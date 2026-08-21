@@ -101,11 +101,21 @@ Yahoo throttling the shared IP the app runs on, not a bug in the scanner.
 **On "everything shows AVOID":** the fundamental score only counts a metric
 (ROE, margins, growth, etc.) toward the score if Yahoo actually returned
 data for it — a missing field is excluded from scoring, not treated as a
-failing grade. If you're still seeing every ticker as AVOID, check the raw
-`P/E`/`ROE%`/`RevGr%` columns in the output: if they're mostly blank across
-the board, Yahoo's `.info` endpoint is returning sparse data for your
-session (common under rate limiting), not a real fundamental problem with
-those companies — wait and re-scan rather than trusting the verdict.
+failing grade. If a ticker has *some* fundamental fields but not others,
+this is enough to fix a skewed AVOID verdict.
+
+If a ticker has **no** fundamental fields at all, the scanner now reports
+`NO DATA` instead of `AVOID` — it means "we couldn't assess this," not
+"this is a bad business." This case is common when running from a
+cloud-hosted IP (Streamlit Cloud, Render, and similar platforms): Yahoo's
+`.info` endpoint requires a cookie/crumb handshake that it frequently
+refuses from datacenter IP ranges, even though price history (used for the
+technical score) keeps working fine via a separate, less-restricted
+endpoint. `fetch_metrics()` retries with `get_info()` once if `.info` comes
+back nearly empty, which helps intermittently but won't fix a hard block.
+If you're seeing `NO DATA` across most tickers, that's the likely cause —
+running the scanner locally (a residential/non-cloud IP) typically resolves
+it.
 
 ### Web app
 
