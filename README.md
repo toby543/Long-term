@@ -90,6 +90,26 @@ python app.py
 
 Then open http://localhost:5000 in your browser.
 
+### Deploying to Render
+
+This repo includes a `render.yaml` blueprint so you can deploy the web app
+with a public URL (reachable from your phone) in a few clicks:
+
+1. Push this repo to GitHub (already done if you're reading this on GitHub).
+2. In the [Render dashboard](https://dashboard.render.com), choose
+   **New > Blueprint**, connect this repo, and Render will read
+   `render.yaml` and provision the service automatically (free plan, Python
+   runtime, `gunicorn app:app` as the start command).
+3. Once deployed, Render gives you a public URL like
+   `https://long-term-stock-scanner.onrender.com` — open that on any device,
+   including your phone.
+
+Notes:
+- The free plan spins down after inactivity, so the first request after a
+  while can take ~30-50s to wake back up.
+- A `Procfile` is also included for platforms that use that convention
+  instead of `render.yaml` (e.g. Heroku-style buildpacks).
+
 ## Output
 
 The scanner prints a ranked table with fundamental score, technical score,
