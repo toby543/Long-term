@@ -76,7 +76,19 @@ python scanner.py --tickers AAPL MSFT --output results.csv
 
 # Only show BUY candidates
 python scanner.py --tickers AAPL MSFT NVDA TSLA --buy-only
+
+# Scan the Nifty 500 (India) — fetched live from NSE, cached locally for a week
+python scanner.py --index nifty500 --limit 50   # try a subset first, it's 500 tickers
+python scanner.py --index nifty500 --buy-only --output nifty500_buys.csv
 ```
+
+Note on the Nifty 500: the constituent list is fetched live from NSE
+(`indices.py`) rather than hardcoded, since index membership changes
+periodically. Scanning all 500 tickers hits `yfinance` 500+ times, so it can
+take several minutes even with the built-in thread-pool parallelism
+(`scan()` uses up to 12 concurrent workers) — use `--limit` to try a smaller
+slice first. Relative-strength scoring automatically benchmarks `.NS`/`.BO`
+tickers against the Nifty 500 index (`^CRSLDX`) instead of SPY.
 
 ### Web app
 
