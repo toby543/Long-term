@@ -184,8 +184,11 @@ def score_fundamentals(m: StockMetrics) -> float:
 
     def add(value, weight, good_fn):
         nonlocal score, weight_total
-        weight_total += weight
+        # Only count a metric's weight if we actually have data for it —
+        # a missing field (common with Yahoo's sparse/rate-limited `.info`)
+        # must not be scored as if the company failed that metric.
         if value is not None and not (isinstance(value, float) and np.isnan(value)):
+            weight_total += weight
             score += weight * good_fn(value)
 
     add(m.roe, 20, lambda v: np.clip(v / 0.20, 0, 1))

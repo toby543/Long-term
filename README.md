@@ -98,6 +98,15 @@ hit `ERROR: Rate limited by Yahoo Finance` on individual tickers, wait a
 minute and re-scan, or scan a smaller batch (`--limit`) at a time — this is
 Yahoo throttling the shared IP the app runs on, not a bug in the scanner.
 
+**On "everything shows AVOID":** the fundamental score only counts a metric
+(ROE, margins, growth, etc.) toward the score if Yahoo actually returned
+data for it — a missing field is excluded from scoring, not treated as a
+failing grade. If you're still seeing every ticker as AVOID, check the raw
+`P/E`/`ROE%`/`RevGr%` columns in the output: if they're mostly blank across
+the board, Yahoo's `.info` endpoint is returning sparse data for your
+session (common under rate limiting), not a real fundamental problem with
+those companies — wait and re-scan rather than trusting the verdict.
+
 ### Web app
 
 Two front-ends wrap the same `scan()` logic — pick whichever you prefer.
