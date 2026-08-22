@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Goan Recipes",
+    "slug": "goan-recipes",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#FFF6E9"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.goanrecipes.app"
+    },
+    "android": {
+      "package": "com.goanrecipes.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFF6E9"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
