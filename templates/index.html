@@ -133,6 +133,11 @@
             <input type="checkbox" id="force_refresh" name="force_refresh" {% if force_refresh %}checked{% endif %}>
             <label for="force_refresh" style="margin:0;" title="Bypass the 15-minute result cache and re-fetch everything">Force refresh</label>
           </span>
+          <span style="display:flex; align-items:center; gap:0.4rem;">
+            <label for="top_n" style="margin:0;">Top N</label>
+            <input type="number" id="top_n" name="top_n" min="1" placeholder="all" value="{{ top_n or '' }}"
+                   style="width:5rem; background:#0b0d12; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:0.3rem 0.5rem;">
+          </span>
         </div>
         <button type="submit">Scan</button>
       </div>

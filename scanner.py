@@ -470,6 +470,7 @@ def main():
         help="Scan a whole index instead of (or in addition to) --tickers/--file",
     )
     parser.add_argument("--limit", type=int, help="Cap the number of tickers scanned (useful with --index)")
+    parser.add_argument("--top", type=int, help="Show only the top N results by Score (applied after --buy-only)")
     parser.add_argument("--output", help="Path to write results as CSV")
     parser.add_argument("--buy-only", action="store_true", help="Only show BUY verdicts")
     parser.add_argument(
@@ -503,6 +504,9 @@ def main():
 
     if args.buy_only:
         df = df[df["Verdict"] == "BUY"]
+
+    if args.top:
+        df = df.head(args.top)  # df is already sorted by Score descending
 
     if df.empty:
         print("No results.")
