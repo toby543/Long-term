@@ -21,6 +21,8 @@ import pandas as pd
 import yfinance as yf
 from tabulate import tabulate
 
+import kite_data
+
 DEFAULT_TICKERS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA",
     "COST", "V", "MA", "UNH", "JNJ", "PG",
@@ -82,9 +84,9 @@ class StockMetrics:
     relative_strength_6m: Optional[float] = None
     volume_trend: Optional[float] = None
 
-    fundamental_score: float = 0.0
+    fundamental_score: Optional[float] = None
     technical_score: float = 0.0
-    composite_score: float = 0.0
+    composite_score: Optional[float] = None
     verdict: str = "N/A"
 
 
@@ -110,18 +112,42 @@ def compute_rsi(series: pd.Series, period: int = 14) -> float:
 def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame) -> StockMetrics:
     m = StockMetrics(ticker=ticker)
 
+    is_indian = ticker.upper().endswith((".NS", ".BO"))
+    kite_hist = kite_data.fetch_history(ticker) if is_indian and kite_data.is_configured() else pd.DataFrame()
+
+    info = {}
+    hist = kite_hist  # may be empty if Kite isn't configured/available for this ticker
+
     for attempt in range(MAX_RETRIES + 1):
         try:
             _throttle()
             tk = yf.Ticker(ticker)
             info = tk.info or {}
-            hist = tk.history(period="1y", auto_adjust=True)
+            if len(info) < 5:
+                # `.info` can silently come back near-empty (no exception) when
+                # Yahoo's quoteSummary endpoint gates a request — e.g. from a
+                # datacenter/cloud IP. get_info() forces a fresh, uncached
+                # fetch and occasionally succeeds where the cached property
+                # didn't.
+                try:
+                    info = tk.get_info() or info
+                except Exception:
+                    pass
+
+            if hist.empty:
+                hist = tk.history(period="1y", auto_adjust=True)
             break
         except Exception as exc:
             if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
                 delay = RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1.5)
                 time.sleep(delay)
                 continue
+            if not hist.empty:
+                # Yahoo failed (fundamentals unavailable), but we already
+                # have good price history from Kite — proceed with a
+                # technical-only read (fundamental score comes back None)
+                # instead of discarding perfectly good data.
+                break
             m.error = "Rate limited by Yahoo Finance — try again shortly or scan fewer tickers" \
                 if _is_rate_limit_error(exc) else str(exc)
             return m
@@ -178,7 +204,13 @@ def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame) -> StockMetrics:
     return m
 
 
-def score_fundamentals(m: StockMetrics) -> float:
+def score_fundamentals(m: StockMetrics) -> Optional[float]:
+    """Returns a 0-100 score, or None if Yahoo returned no usable fundamental data at all.
+
+    None is distinct from a legitimately bad (near-0) score: it means "we
+    can't assess this," not "this fails every metric" — those must not be
+    treated the same when classifying a verdict.
+    """
     score = 0.0
     weight_total = 0.0
 
@@ -200,7 +232,7 @@ def score_fundamentals(m: StockMetrics) -> float:
     add(m.free_cash_flow, 10, lambda v: 1.0 if v > 0 else 0.0)
     add(m.peg_ratio, 10, lambda v: np.clip(1 - ((v - 1) / 2), 0, 1) if v > 0 else 0.3)
 
-    return round((score / weight_total) * 100, 1) if weight_total else 0.0
+    return round((score / weight_total) * 100, 1) if weight_total else None
 
 
 def score_technicals(m: StockMetrics) -> float:
@@ -237,8 +269,12 @@ def score_technicals(m: StockMetrics) -> float:
     return round((score / weight_total) * 100, 1) if weight_total else 0.0
 
 
-def classify(fundamental_score: float, technical_score: float) -> str:
-    composite = fundamental_score * 0.65 + technical_score * 0.35
+def classify(fundamental_score: Optional[float], technical_score: float) -> str:
+    if fundamental_score is None:
+        # Yahoo gave us no fundamental data to assess at all (common from
+        # cloud-hosted IPs) — say so rather than defaulting to AVOID, which
+        # would misrepresent "unknown" as "bad".
+        return "NO DATA"
     if fundamental_score >= 60 and technical_score >= 55:
         return "BUY"
     if fundamental_score >= 45 and technical_score >= 40:
@@ -257,7 +293,11 @@ def _row_for(m: StockMetrics) -> dict:
 
     m.fundamental_score = score_fundamentals(m)
     m.technical_score = score_technicals(m)
-    m.composite_score = round(m.fundamental_score * 0.65 + m.technical_score * 0.35, 1)
+    m.composite_score = (
+        round(m.fundamental_score * 0.65 + m.technical_score * 0.35, 1)
+        if m.fundamental_score is not None
+        else None  # can't compute a meaningful composite without any fundamentals
+    )
     m.verdict = classify(m.fundamental_score, m.technical_score)
 
     return {

@@ -85,7 +85,7 @@ if submitted:
                 st.info("No results to show.")
             else:
                 def highlight_verdict(row):
-                    colors = {"BUY": "#1f9d55", "WATCH": "#c99a2e", "AVOID": "#b3403a"}
+                    colors = {"BUY": "#1f9d55", "WATCH": "#c99a2e", "AVOID": "#b3403a", "NO DATA": "#9aa0ab"}
                     color = colors.get(row.get("Verdict"), None)
                     if color:
                         return [f"color: {color}; font-weight: 700" if col == "Verdict" else "" for col in row.index]
