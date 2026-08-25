@@ -91,7 +91,15 @@ if submitted:
                         return [f"color: {color}; font-weight: 700" if col == "Verdict" else "" for col in row.index]
                     return ["" for _ in row.index]
 
-                styled = df.style.apply(highlight_verdict, axis=1)
+                # Display formatting only — underlying values are unrounded floats;
+                # without this, Streamlit renders them at full float precision
+                # (e.g. "97.400000" instead of "97.4").
+                one_decimal = ["Fund.", "Tech.", "Score", "P/E", "ROE%", "RevGr%", "RSI", "%OffHigh", "RS6m%"]
+                two_decimal = ["PEG", "D/E"]
+                fmt = {col: "{:.1f}" for col in one_decimal if col in df.columns}
+                fmt.update({col: "{:.2f}" for col in two_decimal if col in df.columns})
+
+                styled = df.style.apply(highlight_verdict, axis=1).format(fmt, na_rep="—")
                 st.dataframe(styled, use_container_width=True, hide_index=True)
 
                 csv = df.to_csv(index=False).encode("utf-8")
