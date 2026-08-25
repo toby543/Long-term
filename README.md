@@ -263,6 +263,19 @@ technical score, composite score, and a verdict (`BUY`, `WATCH`, `AVOID`,
 or `NO DATA`), plus the key raw metrics behind each score so you can
 sanity-check the call yourself.
 
+**Entry Price** is a simple, explainable suggested buy price — not
+necessarily the current price. If a stock's RSI is overbought (>65) and its
+50-day average sits below the current price, that average is offered as a
+pullback target (a level buyers have recently supported, and momentum names
+often retrace toward before continuing); otherwise the current price is used
+as-is. This is a heuristic, not a guarantee — always use your own judgment
+on entry timing.
+
+Both web UIs also let you enter an **amount to invest per pick**, which adds
+a **Qty** column = `floor(investment amount ÷ Entry Price)`. Leave it blank
+to skip the calculation. Both UIs also show a summary row of BUY/WATCH/AVOID
+counts above the results table.
+
 ## Disclaimer
 
 This is a screening tool for research and education, not financial advice.
