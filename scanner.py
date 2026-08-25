@@ -21,6 +21,8 @@ import pandas as pd
 import yfinance as yf
 from tabulate import tabulate
 
+import kite_data
+
 DEFAULT_TICKERS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA",
     "COST", "V", "MA", "UNH", "JNJ", "PG",
@@ -110,6 +112,12 @@ def compute_rsi(series: pd.Series, period: int = 14) -> float:
 def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame) -> StockMetrics:
     m = StockMetrics(ticker=ticker)
 
+    is_indian = ticker.upper().endswith((".NS", ".BO"))
+    kite_hist = kite_data.fetch_history(ticker) if is_indian and kite_data.is_configured() else pd.DataFrame()
+
+    info = {}
+    hist = kite_hist  # may be empty if Kite isn't configured/available for this ticker
+
     for attempt in range(MAX_RETRIES + 1):
         try:
             _throttle()
@@ -125,13 +133,21 @@ def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame) -> StockMetrics:
                     info = tk.get_info() or info
                 except Exception:
                     pass
-            hist = tk.history(period="1y", auto_adjust=True)
+
+            if hist.empty:
+                hist = tk.history(period="1y", auto_adjust=True)
             break
         except Exception as exc:
             if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
                 delay = RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1.5)
                 time.sleep(delay)
                 continue
+            if not hist.empty:
+                # Yahoo failed (fundamentals unavailable), but we already
+                # have good price history from Kite — proceed with a
+                # technical-only read (fundamental score comes back None)
+                # instead of discarding perfectly good data.
+                break
             m.error = "Rate limited by Yahoo Finance — try again shortly or scan fewer tickers" \
                 if _is_rate_limit_error(exc) else str(exc)
             return m

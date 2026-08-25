@@ -115,7 +115,42 @@ endpoint. `fetch_metrics()` retries with `get_info()` once if `.info` comes
 back nearly empty, which helps intermittently but won't fix a hard block.
 If you're seeing `NO DATA` across most tickers, that's the likely cause —
 running the scanner locally (a residential/non-cloud IP) typically resolves
-it.
+it. The more durable fix for Indian tickers is Zerodha Kite Connect —
+see below.
+
+### Optional: Zerodha Kite Connect for Indian stock prices
+
+Kite Connect gives more reliable price/technical data for NSE-listed
+stocks than Yahoo, since it's not subject to the same rate-limiting or
+cloud-IP blocking. It does **not** provide fundamentals (ROE, margins,
+growth, etc.) — those still come from `yfinance` regardless. This
+integration is entirely optional: without it configured, the scanner
+behaves exactly as before (Yahoo for everything).
+
+**Setup:**
+
+1. Subscribe to [Kite Connect](https://developers.kite.trade) (paid, ~₹2000/month)
+   and create an app to get an `api_key` and `api_secret`.
+2. Install the extra dependency: `pip install -r requirements-kite.txt`
+3. Each trading day, generate a fresh access token (Zerodha requires an
+   interactive browser login + 2FA — this step cannot be automated):
+   ```bash
+   export KITE_API_KEY=your_api_key
+   export KITE_API_SECRET=your_api_secret
+   python kite_login.py
+   ```
+   Follow the printed login URL, log in, and paste back the
+   `request_token` from the redirect when prompted. It prints an
+   `export KITE_ACCESS_TOKEN=...` command — run that too.
+4. With `KITE_API_KEY` and `KITE_ACCESS_TOKEN` set, `scanner.py`
+   automatically uses Kite for price history on any `.NS`/`.BO` ticker
+   (falling back to Yahoo if Kite has no data for that symbol).
+
+Access tokens expire around 6am IST daily, so step 3 needs to be repeated
+each trading day — on a persistent deployment (Render, etc.) you'd need to
+update the `KITE_ACCESS_TOKEN` environment variable there each morning, or
+automate the token refresh with your own scheduled job (Zerodha's login
+step itself still can't be automated).
 
 ### Web app
 
