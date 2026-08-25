@@ -19,6 +19,7 @@ def index():
     results = None
     tickers_input = ", ".join(DEFAULT_TICKERS)
     buy_only = False
+    force_refresh = False
     error = None
 
     source = "custom"
@@ -26,6 +27,7 @@ def index():
     if request.method == "POST":
         source = request.form.get("source", "custom")
         buy_only = bool(request.form.get("buy_only"))
+        force_refresh = bool(request.form.get("force_refresh"))
 
         if source == "nifty500":
             try:
@@ -47,7 +49,7 @@ def index():
             error = "Enter at least one ticker symbol."
         elif not error:
             try:
-                df = scan(tickers)
+                df = scan(tickers, use_cache=not force_refresh)
                 if buy_only:
                     df = df[df["Verdict"] == "BUY"]
                 results = df.to_dict(orient="records")
@@ -59,6 +61,7 @@ def index():
         results=results,
         tickers_input=tickers_input,
         buy_only=buy_only,
+        force_refresh=force_refresh,
         source=source,
         error=error,
     )

@@ -22,6 +22,7 @@ import yfinance as yf
 from tabulate import tabulate
 
 import kite_data
+import result_cache
 
 DEFAULT_TICKERS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA",
@@ -79,12 +80,15 @@ class StockMetrics:
     price: Optional[float] = None
     sma_50: Optional[float] = None
     sma_200: Optional[float] = None
+    sma_200_slope: Optional[float] = None
     rsi_14: Optional[float] = None
     pct_off_52w_high: Optional[float] = None
+    relative_strength_3m: Optional[float] = None
     relative_strength_6m: Optional[float] = None
     volume_trend: Optional[float] = None
 
     fundamental_score: Optional[float] = None
+    fundamental_coverage: Optional[float] = None
     technical_score: float = 0.0
     composite_score: Optional[float] = None
     verdict: str = "N/A"
@@ -109,14 +113,54 @@ def compute_rsi(series: pd.Series, period: int = 14) -> float:
     return float(rsi.iloc[-1]) if not rsi.empty and not np.isnan(rsi.iloc[-1]) else np.nan
 
 
-def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame) -> StockMetrics:
+def _batch_download_history(tickers: list[str]) -> dict:
+    """Fetch 1y daily price history for many tickers in one/few requests.
+
+    yfinance's per-Ticker `.history()` is one HTTP request each; for a
+    500-ticker scan that's 500 round trips. `yf.download()` batches many
+    symbols per request instead, which is both faster and far less likely
+    to trip Yahoo's rate limiting. Best-effort: returns whatever it could
+    get, and callers fall back to per-ticker fetching for the rest.
+    """
+    if not tickers:
+        return {}
+    try:
+        _throttle()
+        data = yf.download(
+            tickers, period="1y", auto_adjust=True, group_by="ticker",
+            threads=True, progress=False,
+        )
+    except Exception:
+        return {}
+
+    result = {}
+    if len(tickers) == 1:
+        # A single-ticker download returns flat (non-grouped) columns.
+        t = tickers[0]
+        if isinstance(data, pd.DataFrame) and not data.empty:
+            result[t] = data
+        return result
+
+    for t in tickers:
+        try:
+            sub = data[t].dropna(how="all")
+            if not sub.empty:
+                result[t] = sub
+        except Exception:
+            continue
+    return result
+
+
+def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame, prefetched_hist: pd.DataFrame = None) -> StockMetrics:
     m = StockMetrics(ticker=ticker)
 
     is_indian = ticker.upper().endswith((".NS", ".BO"))
     kite_hist = kite_data.fetch_history(ticker) if is_indian and kite_data.is_configured() else pd.DataFrame()
 
     info = {}
-    hist = kite_hist  # may be empty if Kite isn't configured/available for this ticker
+    # Precedence: Kite (most reliable for Indian tickers) > batch-downloaded
+    # Yahoo history (avoids a redundant per-ticker request) > per-ticker fetch.
+    hist = kite_hist if not kite_hist.empty else (prefetched_hist if prefetched_hist is not None else pd.DataFrame())
 
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -181,13 +225,25 @@ def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame) -> StockMetrics:
         m.sma_200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
         m.rsi_14 = compute_rsi(close, 14)
 
+        # Trend *strength*, not just position: a price sitting above a
+        # flat or declining 200-day average is a much weaker signal than
+        # one above a 200-day average that's still climbing.
+        sma_200_clean = close.rolling(200).mean().dropna()
+        if len(sma_200_clean) >= 21:
+            prior = sma_200_clean.iloc[-21]
+            m.sma_200_slope = float((sma_200_clean.iloc[-1] - prior) / prior * 100)
+
         high_52w = float(close.max())
         m.pct_off_52w_high = (m.price - high_52w) / high_52w * 100.0
 
-        if benchmark_hist is not None and not benchmark_hist.empty and len(close) >= 126:
-            stock_ret_6m = close.iloc[-1] / close.iloc[-126] - 1
+        if benchmark_hist is not None and not benchmark_hist.empty:
             bench_close = benchmark_hist["Close"]
-            if len(bench_close) >= 126:
+            if len(close) >= 63 and len(bench_close) >= 63:
+                stock_ret_3m = close.iloc[-1] / close.iloc[-63] - 1
+                bench_ret_3m = bench_close.iloc[-1] / bench_close.iloc[-63] - 1
+                m.relative_strength_3m = (stock_ret_3m - bench_ret_3m) * 100.0
+            if len(close) >= 126 and len(bench_close) >= 126:
+                stock_ret_6m = close.iloc[-1] / close.iloc[-126] - 1
                 bench_ret_6m = bench_close.iloc[-1] / bench_close.iloc[-126] - 1
                 m.relative_strength_6m = (stock_ret_6m - bench_ret_6m) * 100.0
 
@@ -232,7 +288,24 @@ def score_fundamentals(m: StockMetrics) -> Optional[float]:
     add(m.free_cash_flow, 10, lambda v: 1.0 if v > 0 else 0.0)
     add(m.peg_ratio, 10, lambda v: np.clip(1 - ((v - 1) / 2), 0, 1) if v > 0 else 0.3)
 
-    return round((score / weight_total) * 100, 1) if weight_total else None
+    # How much of the fundamental rubric we could actually assess — weights
+    # sum to exactly 100, so weight_total doubles as a 0-100% coverage read.
+    # Surfaced separately so a score based on 2 of 8 metrics isn't mistaken
+    # for one based on all 8.
+    m.fundamental_coverage = round(weight_total, 0) if weight_total else None
+
+    if not weight_total:
+        return None
+
+    # Red flag: heavy leverage *and* burning cash is materially worse than
+    # either alone (harder to service debt without internally generated
+    # cash, more likely to need dilutive financing) — an interaction the
+    # independently-weighted average above can't capture on its own.
+    if m.debt_to_equity is not None and m.free_cash_flow is not None:
+        if m.debt_to_equity > 2.0 and m.free_cash_flow < 0:
+            score *= 0.7
+
+    return round((score / weight_total) * 100, 1)
 
 
 def score_technicals(m: StockMetrics) -> float:
@@ -246,9 +319,13 @@ def score_technicals(m: StockMetrics) -> float:
             score += weight * condition_score
 
     if m.price is not None and m.sma_200 is not None:
-        add(1.0 if m.price > m.sma_200 else 0.0, 25)
+        add(1.0 if m.price > m.sma_200 else 0.0, 20)
     if m.sma_50 is not None and m.sma_200 is not None:
-        add(1.0 if m.sma_50 > m.sma_200 else 0.0, 20)
+        add(1.0 if m.sma_50 > m.sma_200 else 0.0, 15)
+    if m.sma_200_slope is not None:
+        # Reward an established, still-climbing uptrend over a price that
+        # merely happens to sit above a flat or declining 200-day average.
+        add(np.clip(0.5 + m.sma_200_slope / 4, 0, 1), 15)
     if m.rsi_14 is not None and not np.isnan(m.rsi_14):
         # Best score in the 40-65 "healthy" band, tapering off outside it.
         if 40 <= m.rsi_14 <= 65:
@@ -260,9 +337,14 @@ def score_technicals(m: StockMetrics) -> float:
         add(rsi_score, 20)
     if m.pct_off_52w_high is not None:
         # Sweet spot: within 20% of the high (not stretched, not broken down).
-        add(np.clip(1 - abs(m.pct_off_52w_high + 10) / 40, 0, 1), 15)
+        add(np.clip(1 - abs(m.pct_off_52w_high + 10) / 40, 0, 1), 10)
     if m.relative_strength_6m is not None:
-        add(np.clip(0.5 + m.relative_strength_6m / 40, 0, 1), 15)
+        add(np.clip(0.5 + m.relative_strength_6m / 40, 0, 1), 10)
+    if m.relative_strength_3m is not None:
+        # A second, shorter momentum window alongside the 6-month one —
+        # blending timeframes is a steadier signal than relying on either
+        # window alone.
+        add(np.clip(0.5 + m.relative_strength_3m / 25, 0, 1), 5)
     if m.volume_trend is not None:
         add(np.clip(0.5 + m.volume_trend / 100, 0, 1), 5)
 
@@ -285,7 +367,8 @@ def classify(fundamental_score: Optional[float], technical_score: float) -> str:
 def _row_for(m: StockMetrics) -> dict:
     if m.error:
         return {
-            "Ticker": m.ticker, "Price": None, "Fund.": None, "Tech.": None, "Score": None,
+            "Ticker": m.ticker, "Price": None, "Fund.": None, "FundCov%": None,
+            "Tech.": None, "Score": None,
             "Verdict": f"ERROR: {m.error}",
             "P/E": None, "PEG": None, "ROE%": None, "RevGr%": None,
             "D/E": None, "RSI": None, "%OffHigh": None, "RS6m%": None,
@@ -304,6 +387,7 @@ def _row_for(m: StockMetrics) -> dict:
         "Ticker": m.ticker,
         "Price": round(m.price, 2) if m.price is not None else None,
         "Fund.": m.fundamental_score,
+        "FundCov%": m.fundamental_coverage,
         "Tech.": m.technical_score,
         "Score": m.composite_score,
         "Verdict": m.verdict,
@@ -318,31 +402,60 @@ def _row_for(m: StockMetrics) -> dict:
     }
 
 
-def scan(tickers: list[str], max_workers: int = MAX_WORKERS) -> pd.DataFrame:
-    # Indices outside the US need their own benchmark for relative-strength
-    # scoring — an Indian stock's return vs. SPY isn't a meaningful signal.
-    is_indian = any(t.upper().endswith((".NS", ".BO")) for t in tickers)
-    benchmark_ticker = NIFTY_BENCHMARK_TICKER if is_indian else BENCHMARK_TICKER
+def scan(
+    tickers: list[str],
+    max_workers: int = MAX_WORKERS,
+    use_cache: bool = True,
+    cache_ttl: int = result_cache.DEFAULT_TTL_SECONDS,
+) -> pd.DataFrame:
+    tickers = list(dict.fromkeys(t.upper() for t in tickers))  # de-dupe, preserve order
 
-    benchmark_hist = None
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            _throttle()
-            benchmark_hist = yf.Ticker(benchmark_ticker).history(period="1y", auto_adjust=True)
-            break
-        except Exception as exc:
-            if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
-                time.sleep(RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1.5))
-                continue
-            break  # non-rate-limit error, or retries exhausted — proceed without a benchmark
+    cache = result_cache.load() if use_cache else {}
+    cached_rows = result_cache.get_fresh_rows(tickers, cache, cache_ttl) if use_cache else {}
+    to_fetch = [t for t in tickers if t not in cached_rows]
 
-    rows = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(fetch_metrics, t, benchmark_hist): t for t in tickers}
-        for future in as_completed(futures):
-            rows.append(_row_for(future.result()))
+    new_rows_by_ticker = {}
+    if to_fetch:
+        # Indices outside the US need their own benchmark for relative-strength
+        # scoring — an Indian stock's return vs. SPY isn't a meaningful signal.
+        is_indian = any(t.endswith((".NS", ".BO")) for t in to_fetch)
+        benchmark_ticker = NIFTY_BENCHMARK_TICKER if is_indian else BENCHMARK_TICKER
 
-    df = pd.DataFrame(rows)
+        benchmark_hist = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                _throttle()
+                benchmark_hist = yf.Ticker(benchmark_ticker).history(period="1y", auto_adjust=True)
+                break
+            except Exception as exc:
+                if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1.5))
+                    continue
+                break  # non-rate-limit error, or retries exhausted — proceed without a benchmark
+
+        # Skip batch-downloading history for tickers Kite will serve directly —
+        # that request would just be wasted.
+        kite_covered = {
+            t for t in to_fetch
+            if t.endswith((".NS", ".BO")) and kite_data.is_configured()
+        }
+        batch_hist = _batch_download_history([t for t in to_fetch if t not in kite_covered])
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(fetch_metrics, t, benchmark_hist, batch_hist.get(t)): t
+                for t in to_fetch
+            }
+            for future in as_completed(futures):
+                m = future.result()
+                new_rows_by_ticker[m.ticker] = _row_for(m)
+
+        if use_cache:
+            result_cache.update(cache, new_rows_by_ticker)
+            result_cache.save(cache)
+
+    all_rows = [cached_rows.get(t) or new_rows_by_ticker.get(t) for t in tickers]
+    df = pd.DataFrame(all_rows)
     if "Score" in df:
         df = df.sort_values(by="Score", ascending=False, na_position="last")
     return df.reset_index(drop=True)
@@ -359,6 +472,10 @@ def main():
     parser.add_argument("--limit", type=int, help="Cap the number of tickers scanned (useful with --index)")
     parser.add_argument("--output", help="Path to write results as CSV")
     parser.add_argument("--buy-only", action="store_true", help="Only show BUY verdicts")
+    parser.add_argument(
+        "--no-cache", action="store_true",
+        help=f"Bypass the {result_cache.DEFAULT_TTL_SECONDS // 60}-minute result cache and force a fresh fetch",
+    )
     args = parser.parse_args()
 
     tickers = []
@@ -382,7 +499,7 @@ def main():
         tickers = tickers[: args.limit]
 
     print(f"Scanning {len(tickers)} ticker(s): {', '.join(tickers)}\n")
-    df = scan(tickers)
+    df = scan(tickers, use_cache=not args.no_cache)
 
     if args.buy_only:
         df = df[df["Verdict"] == "BUY"]
