@@ -124,9 +124,15 @@
       </div>
 
       <div class="row">
-        <div class="checkbox-row">
-          <input type="checkbox" id="buy_only" name="buy_only" {% if buy_only %}checked{% endif %}>
-          <label for="buy_only" style="margin:0;">Show BUY only</label>
+        <div class="checkbox-row" style="gap: 1.25rem;">
+          <span style="display:flex; align-items:center; gap:0.4rem;">
+            <input type="checkbox" id="buy_only" name="buy_only" {% if buy_only %}checked{% endif %}>
+            <label for="buy_only" style="margin:0;">Show BUY only</label>
+          </span>
+          <span style="display:flex; align-items:center; gap:0.4rem;">
+            <input type="checkbox" id="force_refresh" name="force_refresh" {% if force_refresh %}checked{% endif %}>
+            <label for="force_refresh" style="margin:0;" title="Bypass the 15-minute result cache and re-fetch everything">Force refresh</label>
+          </span>
         </div>
         <button type="submit">Scan</button>
       </div>

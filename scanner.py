@@ -22,6 +22,7 @@ import yfinance as yf
 from tabulate import tabulate
 
 import kite_data
+import result_cache
 
 DEFAULT_TICKERS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA",
@@ -109,14 +110,54 @@ def compute_rsi(series: pd.Series, period: int = 14) -> float:
     return float(rsi.iloc[-1]) if not rsi.empty and not np.isnan(rsi.iloc[-1]) else np.nan
 
 
-def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame) -> StockMetrics:
+def _batch_download_history(tickers: list[str]) -> dict:
+    """Fetch 1y daily price history for many tickers in one/few requests.
+
+    yfinance's per-Ticker `.history()` is one HTTP request each; for a
+    500-ticker scan that's 500 round trips. `yf.download()` batches many
+    symbols per request instead, which is both faster and far less likely
+    to trip Yahoo's rate limiting. Best-effort: returns whatever it could
+    get, and callers fall back to per-ticker fetching for the rest.
+    """
+    if not tickers:
+        return {}
+    try:
+        _throttle()
+        data = yf.download(
+            tickers, period="1y", auto_adjust=True, group_by="ticker",
+            threads=True, progress=False,
+        )
+    except Exception:
+        return {}
+
+    result = {}
+    if len(tickers) == 1:
+        # A single-ticker download returns flat (non-grouped) columns.
+        t = tickers[0]
+        if isinstance(data, pd.DataFrame) and not data.empty:
+            result[t] = data
+        return result
+
+    for t in tickers:
+        try:
+            sub = data[t].dropna(how="all")
+            if not sub.empty:
+                result[t] = sub
+        except Exception:
+            continue
+    return result
+
+
+def fetch_metrics(ticker: str, benchmark_hist: pd.DataFrame, prefetched_hist: pd.DataFrame = None) -> StockMetrics:
     m = StockMetrics(ticker=ticker)
 
     is_indian = ticker.upper().endswith((".NS", ".BO"))
     kite_hist = kite_data.fetch_history(ticker) if is_indian and kite_data.is_configured() else pd.DataFrame()
 
     info = {}
-    hist = kite_hist  # may be empty if Kite isn't configured/available for this ticker
+    # Precedence: Kite (most reliable for Indian tickers) > batch-downloaded
+    # Yahoo history (avoids a redundant per-ticker request) > per-ticker fetch.
+    hist = kite_hist if not kite_hist.empty else (prefetched_hist if prefetched_hist is not None else pd.DataFrame())
 
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -318,31 +359,60 @@ def _row_for(m: StockMetrics) -> dict:
     }
 
 
-def scan(tickers: list[str], max_workers: int = MAX_WORKERS) -> pd.DataFrame:
-    # Indices outside the US need their own benchmark for relative-strength
-    # scoring — an Indian stock's return vs. SPY isn't a meaningful signal.
-    is_indian = any(t.upper().endswith((".NS", ".BO")) for t in tickers)
-    benchmark_ticker = NIFTY_BENCHMARK_TICKER if is_indian else BENCHMARK_TICKER
+def scan(
+    tickers: list[str],
+    max_workers: int = MAX_WORKERS,
+    use_cache: bool = True,
+    cache_ttl: int = result_cache.DEFAULT_TTL_SECONDS,
+) -> pd.DataFrame:
+    tickers = list(dict.fromkeys(t.upper() for t in tickers))  # de-dupe, preserve order
 
-    benchmark_hist = None
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            _throttle()
-            benchmark_hist = yf.Ticker(benchmark_ticker).history(period="1y", auto_adjust=True)
-            break
-        except Exception as exc:
-            if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
-                time.sleep(RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1.5))
-                continue
-            break  # non-rate-limit error, or retries exhausted — proceed without a benchmark
+    cache = result_cache.load() if use_cache else {}
+    cached_rows = result_cache.get_fresh_rows(tickers, cache, cache_ttl) if use_cache else {}
+    to_fetch = [t for t in tickers if t not in cached_rows]
 
-    rows = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(fetch_metrics, t, benchmark_hist): t for t in tickers}
-        for future in as_completed(futures):
-            rows.append(_row_for(future.result()))
+    new_rows_by_ticker = {}
+    if to_fetch:
+        # Indices outside the US need their own benchmark for relative-strength
+        # scoring — an Indian stock's return vs. SPY isn't a meaningful signal.
+        is_indian = any(t.endswith((".NS", ".BO")) for t in to_fetch)
+        benchmark_ticker = NIFTY_BENCHMARK_TICKER if is_indian else BENCHMARK_TICKER
 
-    df = pd.DataFrame(rows)
+        benchmark_hist = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                _throttle()
+                benchmark_hist = yf.Ticker(benchmark_ticker).history(period="1y", auto_adjust=True)
+                break
+            except Exception as exc:
+                if _is_rate_limit_error(exc) and attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1.5))
+                    continue
+                break  # non-rate-limit error, or retries exhausted — proceed without a benchmark
+
+        # Skip batch-downloading history for tickers Kite will serve directly —
+        # that request would just be wasted.
+        kite_covered = {
+            t for t in to_fetch
+            if t.endswith((".NS", ".BO")) and kite_data.is_configured()
+        }
+        batch_hist = _batch_download_history([t for t in to_fetch if t not in kite_covered])
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(fetch_metrics, t, benchmark_hist, batch_hist.get(t)): t
+                for t in to_fetch
+            }
+            for future in as_completed(futures):
+                m = future.result()
+                new_rows_by_ticker[m.ticker] = _row_for(m)
+
+        if use_cache:
+            result_cache.update(cache, new_rows_by_ticker)
+            result_cache.save(cache)
+
+    all_rows = [cached_rows.get(t) or new_rows_by_ticker.get(t) for t in tickers]
+    df = pd.DataFrame(all_rows)
     if "Score" in df:
         df = df.sort_values(by="Score", ascending=False, na_position="last")
     return df.reset_index(drop=True)
@@ -359,6 +429,10 @@ def main():
     parser.add_argument("--limit", type=int, help="Cap the number of tickers scanned (useful with --index)")
     parser.add_argument("--output", help="Path to write results as CSV")
     parser.add_argument("--buy-only", action="store_true", help="Only show BUY verdicts")
+    parser.add_argument(
+        "--no-cache", action="store_true",
+        help=f"Bypass the {result_cache.DEFAULT_TTL_SECONDS // 60}-minute result cache and force a fresh fetch",
+    )
     args = parser.parse_args()
 
     tickers = []
@@ -382,7 +456,7 @@ def main():
         tickers = tickers[: args.limit]
 
     print(f"Scanning {len(tickers)} ticker(s): {', '.join(tickers)}\n")
-    df = scan(tickers)
+    df = scan(tickers, use_cache=not args.no_cache)
 
     if args.buy_only:
         df = df[df["Verdict"] == "BUY"]

@@ -57,6 +57,25 @@ Weighting emphasizes fundamentals (65%) over technicals (35%), since this is
 a long-term strategy — technicals here are a filter/timing aid, not the
 primary thesis.
 
+## Performance
+
+Two things keep `scan()` fast and light on API calls, especially for large
+scans like the Nifty 500:
+
+- **Batched price downloads.** Instead of one HTTP request per ticker,
+  `yf.download()` fetches price history for many tickers per request. This
+  cuts request counts drastically (roughly 500 → a handful for a full
+  Nifty 500 scan) and reduces exposure to Yahoo's rate limiting. Tickers
+  Kite Connect will serve directly are excluded from the batch, since that
+  request would be wasted.
+- **A 15-minute result cache** (`result_cache.py`), keyed by ticker. Repeat
+  scans of overlapping ticker lists — retrying, tweaking `--limit`, toggling
+  "Show BUY only" — reuse cached rows instead of re-fetching. The whole
+  cache is a single JSON file (`.cache/scan_results.json`) loaded and saved
+  once per scan, not per ticker, to avoid file I/O contention under the
+  thread pool. Pass `--no-cache` on the CLI, or check "Force refresh" in
+  either web UI, to bypass it.
+
 ## Usage
 
 ```bash

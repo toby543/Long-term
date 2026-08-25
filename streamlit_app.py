@@ -43,9 +43,11 @@ with st.form("scan_form"):
         tickers_input = None
         limit = st.slider("Limit (0 = all 500)", 0, 500, 50, step=10)
 
-    col1, col2 = st.columns([1, 4])
+    col1, col2, col3 = st.columns([1, 1, 3])
     with col1:
         buy_only = st.checkbox("Show BUY only")
+    with col2:
+        force_refresh = st.checkbox("Force refresh", help="Bypass the 15-minute result cache and re-fetch everything")
     submitted = st.form_submit_button("Scan", type="primary")
 
 if submitted:
@@ -72,7 +74,7 @@ if submitted:
     elif tickers:
         with st.spinner(f"Scanning {len(tickers)} ticker(s)..."):
             try:
-                df = scan(tickers)
+                df = scan(tickers, use_cache=not force_refresh)
             except Exception as exc:
                 st.error(f"Scan failed: {exc}")
                 df = None
