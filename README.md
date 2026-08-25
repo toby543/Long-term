@@ -30,6 +30,21 @@ This is a classic **quality + reasonable price (GARP)** approach — closer to
 Buffett/Munger/Lynch than deep value or pure momentum. The goal isn't the
 cheapest stock, it's the best business you can buy without overpaying.
 
+**Debt + negative free cash flow is scored as an interaction, not just two
+independent metrics.** A company that's both heavily levered (D/E > 2.0) and
+currently burning cash is in materially more danger than either fact alone
+suggests — it's harder to service that debt without internally generated
+cash, which raises the odds of dilutive financing or distress. That
+combination applies an extra penalty to the fundamental score on top of the
+individually-weighted metrics above.
+
+**Fundamental coverage is tracked and surfaced** (the `FundCov%` column) —
+what fraction of the 8 fundamental metrics Yahoo actually returned data for.
+A score built on 2 of 8 metrics is real but much less certain than one built
+on all 8; the raw `Fund.` score doesn't distinguish that on its own, so
+`FundCov%` lets you weigh the confidence yourself. (A ticker with 0%
+coverage doesn't get a `Fund.` score at all — see `NO DATA` below.)
+
 ### 2. Technical screen — "is the trend/market agreeing with me?"
 
 Long-term investing doesn't mean ignoring price action — it means using it as
@@ -39,9 +54,11 @@ a *confirmation and timing filter*, not the primary decision driver.
 |---|---|---|
 | Price > 200-day SMA | Long-term uptrend | Don't buy into a structural downtrend |
 | 50-day SMA > 200-day SMA | "Golden cross" regime | Medium-term trend confirms long-term trend |
+| 200-day SMA slope | Is the long-term average itself still rising | A price sitting above a *flat or declining* 200-day average is a much weaker signal than one above a still-climbing average — position alone doesn't capture trend strength |
 | RSI(14) between 35–70 | Not extremely overbought/oversold | Avoid chasing blow-off tops; avoid falling knives |
 | Off 52-week high | Distance from high | Flags stretched entries (very extended = wait for a pullback) |
-| Relative strength vs benchmark (e.g. SPY) | Outperformance over 6–12 months | Buy relative leaders, not laggards |
+| Relative strength vs benchmark, 6-month | Outperformance over 6 months | Buy relative leaders, not laggards |
+| Relative strength vs benchmark, 3-month | Outperformance over 3 months | A second, shorter momentum window blended with the 6-month one is a steadier signal than relying on a single window — a stock that just started outperforming (or just stopped) shows up here first |
 | Volume trend | Above-average volume on up moves | Confirms institutional participation |
 
 ### 3. Composite score
