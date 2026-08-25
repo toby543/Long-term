@@ -43,11 +43,13 @@ with st.form("scan_form"):
         tickers_input = None
         limit = st.slider("Limit (0 = all 500)", 0, 500, 50, step=10)
 
-    col1, col2, col3 = st.columns([1, 1, 3])
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
     with col1:
         buy_only = st.checkbox("Show BUY only")
     with col2:
         force_refresh = st.checkbox("Force refresh", help="Bypass the 15-minute result cache and re-fetch everything")
+    with col3:
+        top_n = st.number_input("Top N (0 = all)", min_value=0, value=0, step=5)
     submitted = st.form_submit_button("Scan", type="primary")
 
 if submitted:
@@ -82,6 +84,9 @@ if submitted:
         if df is not None:
             if buy_only:
                 df = df[df["Verdict"] == "BUY"]
+
+            if top_n:
+                df = df.head(int(top_n))  # already sorted by Score descending
 
             if df.empty:
                 st.info("No results to show.")

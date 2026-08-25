@@ -113,10 +113,19 @@ python scanner.py --tickers AAPL MSFT --output results.csv
 # Only show BUY candidates
 python scanner.py --tickers AAPL MSFT NVDA TSLA --buy-only
 
+# Only show the top 10 results by Score (applied after --buy-only, if set)
+python scanner.py --index nifty500 --limit 100 --top 10
+
 # Scan the Nifty 500 (India) — fetched live from NSE, cached locally for a week
 python scanner.py --index nifty500 --limit 50   # try a subset first, it's 500 tickers
 python scanner.py --index nifty500 --buy-only --output nifty500_buys.csv
 ```
+
+Note the two different limits: `--limit` caps how many tickers get *scanned*
+in the first place (useful with `--index` so you don't wait on all 500);
+`--top` caps how many *results* are shown afterward, keeping the
+highest-scoring N. Both web UIs have the same distinction — the Nifty 500
+"Limit" slider vs. the "Top N" field.
 
 Note on the Nifty 500: the constituent list is fetched live from NSE
 (`indices.py`) rather than hardcoded, since index membership changes

@@ -20,6 +20,7 @@ def index():
     tickers_input = ", ".join(DEFAULT_TICKERS)
     buy_only = False
     force_refresh = False
+    top_n = None
     error = None
 
     source = "custom"
@@ -28,6 +29,7 @@ def index():
         source = request.form.get("source", "custom")
         buy_only = bool(request.form.get("buy_only"))
         force_refresh = bool(request.form.get("force_refresh"))
+        top_n = request.form.get("top_n", type=int)
 
         if source == "nifty500":
             try:
@@ -52,6 +54,8 @@ def index():
                 df = scan(tickers, use_cache=not force_refresh)
                 if buy_only:
                     df = df[df["Verdict"] == "BUY"]
+                if top_n:
+                    df = df.head(top_n)  # already sorted by Score descending
                 results = df.to_dict(orient="records")
             except Exception as exc:  # surface scan failures to the user instead of a 500
                 error = f"Scan failed: {exc}"
@@ -62,6 +66,7 @@ def index():
         tickers_input=tickers_input,
         buy_only=buy_only,
         force_refresh=force_refresh,
+        top_n=top_n,
         source=source,
         error=error,
     )
