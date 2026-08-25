@@ -95,7 +95,7 @@ if submitted:
                 # without this, Streamlit renders them at full float precision
                 # (e.g. "97.400000" instead of "97.4").
                 one_decimal = ["Fund.", "Tech.", "Score", "P/E", "ROE%", "RevGr%", "RSI", "%OffHigh", "RS6m%"]
-                two_decimal = ["PEG", "D/E"]
+                two_decimal = ["Price", "PEG", "D/E"]
                 fmt = {col: "{:.1f}" for col in one_decimal if col in df.columns}
                 fmt.update({col: "{:.2f}" for col in two_decimal if col in df.columns})
 

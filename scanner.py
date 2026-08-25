@@ -285,7 +285,7 @@ def classify(fundamental_score: Optional[float], technical_score: float) -> str:
 def _row_for(m: StockMetrics) -> dict:
     if m.error:
         return {
-            "Ticker": m.ticker, "Fund.": None, "Tech.": None, "Score": None,
+            "Ticker": m.ticker, "Price": None, "Fund.": None, "Tech.": None, "Score": None,
             "Verdict": f"ERROR: {m.error}",
             "P/E": None, "PEG": None, "ROE%": None, "RevGr%": None,
             "D/E": None, "RSI": None, "%OffHigh": None, "RS6m%": None,
@@ -302,6 +302,7 @@ def _row_for(m: StockMetrics) -> dict:
 
     return {
         "Ticker": m.ticker,
+        "Price": round(m.price, 2) if m.price is not None else None,
         "Fund.": m.fundamental_score,
         "Tech.": m.technical_score,
         "Score": m.composite_score,
