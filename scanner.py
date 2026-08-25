@@ -364,10 +364,28 @@ def classify(fundamental_score: Optional[float], technical_score: float) -> str:
     return "AVOID"
 
 
+def compute_entry_price(m: StockMetrics) -> Optional[float]:
+    """A simple, explainable suggested entry price — not the current price
+    verbatim when the stock looks technically extended.
+
+    If RSI shows overbought (>65) and the 50-day SMA sits below the current
+    price, that gap is a reasonable pullback target: it's the average price
+    buyers have paid recently, and momentum names often retrace toward it
+    before continuing. Otherwise there's no technical reason to wait, so the
+    current price is the entry.
+    """
+    if m.price is None:
+        return None
+    overbought = m.rsi_14 is not None and not np.isnan(m.rsi_14) and m.rsi_14 > 65
+    if overbought and m.sma_50 is not None and m.sma_50 < m.price:
+        return round(m.sma_50, 2)
+    return round(m.price, 2)
+
+
 def _row_for(m: StockMetrics) -> dict:
     if m.error:
         return {
-            "Ticker": m.ticker, "Price": None, "Fund.": None, "FundCov%": None,
+            "Ticker": m.ticker, "Price": None, "EntryPrice": None, "Fund.": None, "FundCov%": None,
             "Tech.": None, "Score": None,
             "Verdict": f"ERROR: {m.error}",
             "P/E": None, "PEG": None, "ROE%": None, "RevGr%": None,
@@ -386,6 +404,7 @@ def _row_for(m: StockMetrics) -> dict:
     return {
         "Ticker": m.ticker,
         "Price": round(m.price, 2) if m.price is not None else None,
+        "EntryPrice": compute_entry_price(m),
         "Fund.": m.fundamental_score,
         "FundCov%": m.fundamental_coverage,
         "Tech.": m.technical_score,

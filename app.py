@@ -7,6 +7,8 @@ Run with:
 Then open http://localhost:5000
 """
 
+import math
+
 from flask import Flask, render_template, request
 
 from scanner import DEFAULT_TICKERS, scan
@@ -21,6 +23,8 @@ def index():
     buy_only = False
     force_refresh = False
     top_n = None
+    invest_amount = None
+    verdict_counts = None
     error = None
 
     source = "custom"
@@ -30,6 +34,7 @@ def index():
         buy_only = bool(request.form.get("buy_only"))
         force_refresh = bool(request.form.get("force_refresh"))
         top_n = request.form.get("top_n", type=int)
+        invest_amount = request.form.get("invest_amount", type=float)
 
         if source == "nifty500":
             try:
@@ -52,11 +57,17 @@ def index():
         elif not error:
             try:
                 df = scan(tickers, use_cache=not force_refresh)
+                verdict_counts = df["Verdict"].value_counts().to_dict()
                 if buy_only:
                     df = df[df["Verdict"] == "BUY"]
                 if top_n:
                     df = df.head(top_n)  # already sorted by Score descending
-                results = df.to_dict(orient="records")
+                if invest_amount and invest_amount > 0 and "EntryPrice" in df.columns:
+                    df = df.copy()
+                    df["Qty"] = df["EntryPrice"].apply(
+                        lambda p: math.floor(invest_amount / p) if p and p > 0 else None
+                    )
+                results = df.rename(columns={"EntryPrice": "Entry Price"}).to_dict(orient="records")
             except Exception as exc:  # surface scan failures to the user instead of a 500
                 error = f"Scan failed: {exc}"
 
@@ -67,6 +78,8 @@ def index():
         buy_only=buy_only,
         force_refresh=force_refresh,
         top_n=top_n,
+        invest_amount=invest_amount,
+        verdict_counts=verdict_counts,
         source=source,
         error=error,
     )
