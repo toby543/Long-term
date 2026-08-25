@@ -213,9 +213,10 @@ Notes:
 
 ## Output
 
-The scanner prints a ranked table with fundamental score, technical score,
-composite score, and a verdict (`BUY`, `WATCH`, `AVOID`), plus the key raw
-metrics behind each score so you can sanity-check the call yourself.
+The scanner prints a ranked table with the current price, fundamental score,
+technical score, composite score, and a verdict (`BUY`, `WATCH`, `AVOID`,
+or `NO DATA`), plus the key raw metrics behind each score so you can
+sanity-check the call yourself.
 
 ## Disclaimer
 
