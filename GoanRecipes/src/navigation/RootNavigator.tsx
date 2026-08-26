@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Text } from 'react-native';
@@ -36,9 +36,13 @@ function FavoritesStackNavigator() {
   );
 }
 
-export default function RootNavigator() {
+interface Props {
+  navigationRef?: React.RefObject<NavigationContainerRef<RootStackParamList>>;
+}
+
+export default function RootNavigator({ navigationRef }: Props) {
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Tab.Navigator
         screenOptions={{
           headerShown: false,
